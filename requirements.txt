@@ -1,0 +1,6 @@
+mcp>=2.3.0
+trino>=0.340.0
+uvicorn>=0.54.0
+starlette>=1.10.0
+importlib_resources>=7.1.0
+./ldq_python_client-1.0.0-py3-none-any.whl
