@@ -99,8 +99,23 @@ def _build_ldq_properties() -> dict[str, str]:
     if os.environ.get("WD_PRIVATE_KEY_FILE"):
         props["wd.authn.privateKeyFile"] = os.environ["WD_PRIVATE_KEY_FILE"]
     else:
-        props["wd.authn.privateKey"] = os.environ["WD_PRIVATE_KEY"]
+        props["wd.authn.privateKey"] = _normalize_private_key(os.environ["WD_PRIVATE_KEY"])
     return props
+
+
+def _normalize_private_key(raw: str) -> str:
+    """Make WD_PRIVATE_KEY robust to how it was pasted.
+
+    Web dashboards (Render, Railway, etc.) sometimes store a pasted
+    multi-line value with literal two-character "\\n" sequences instead of
+    real newline bytes, depending on how the value was copied in. A key in
+    that form fails to parse with a confusing "Could not parse the provided
+    public key" error that looks identical to a genuinely corrupt key. If we
+    don't see any real newlines but do see literal "\\n", convert them.
+    """
+    if "\n" not in raw and "\\n" in raw:
+        raw = raw.replace("\\n", "\n")
+    return raw.strip()
 
 
 def _get_connection():
