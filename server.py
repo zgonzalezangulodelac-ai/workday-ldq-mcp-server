@@ -33,6 +33,7 @@ from typing import Any
 from workday_ldq import create_connection
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.streamable_http import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -235,7 +236,33 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
 
 def build_app():
-    app = mcp.streamable_http_app()
+    # The MCP SDK validates the incoming Host header (DNS rebinding protection)
+    # against an explicit allowlist -- by default that list is empty, which
+    # rejects every real deployment host with "421 Misdirected Request". Set
+    # ALLOWED_HOSTS to the host(s) this server will actually be reached at,
+    # e.g. "workday-ldq-mcp-server.onrender.com" (no scheme, no port needed
+    # for the default 443/80). Comma-separate multiple hosts if needed.
+    allowed_hosts_env = os.environ.get("ALLOWED_HOSTS", "")
+    allowed_hosts = [h.strip() for h in allowed_hosts_env.split(",") if h.strip()]
+    # Always allow localhost too, so local testing keeps working.
+    for local_host in ("127.0.0.1", "localhost"):
+        if local_host not in allowed_hosts:
+            allowed_hosts.append(local_host)
+
+    transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=["*"],
+    )
+    if not allowed_hosts_env:
+        log.warning(
+            "ALLOWED_HOSTS is not set -- only localhost will be accepted. "
+            "Set ALLOWED_HOSTS to your deployed hostname (e.g. "
+            "'workday-ldq-mcp-server.onrender.com') or every real request will "
+            "get '421 Misdirected Request'."
+        )
+
+    app = mcp.streamable_http_app(transport_security=transport_security)
     shared_secret = os.environ.get("MCP_SHARED_SECRET")
     if shared_secret:
         app = Starlette(
