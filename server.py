@@ -250,6 +250,41 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+async def debug_connection(request: Request) -> Response:
+    """Diagnostic endpoint: attempts a real LDQ connection and returns either
+    the live table list or the FULL exception traceback as plain text.
+
+    This exists specifically so the real error is visible without needing
+    shell/log access (e.g. on a free-tier host where a shell isn't available).
+    Protected by the same bearer secret as the MCP endpoint itself -- do not
+    leave this reachable without MCP_SHARED_SECRET set.
+    """
+    import traceback as tb_module
+
+    secret = os.environ.get("MCP_SHARED_SECRET")
+    if secret:
+        auth = request.headers.get("authorization", "")
+        if auth != f"Bearer {secret}":
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+
+    try:
+        conn = _get_connection()
+        cur = conn.cursor()
+        cur.execute("SHOW TABLES")
+        rows = cur.fetchall()
+        conn.close()
+        return Response(
+            f"SUCCESS\n\nFirst 10 tables:\n" + "\n".join(r[0] for r in rows[:10]),
+            media_type="text/plain",
+        )
+    except Exception:
+        return Response(
+            "FAILED\n\n" + tb_module.format_exc(),
+            media_type="text/plain",
+            status_code=500,
+        )
+
+
 def build_app():
     # The MCP SDK validates the incoming Host header (DNS rebinding protection)
     # against an explicit allowlist -- by default that list is empty, which
@@ -278,6 +313,10 @@ def build_app():
         )
 
     app = mcp.streamable_http_app(transport_security=transport_security)
+
+    from starlette.routing import Route
+    app.router.routes.append(Route("/debug", debug_connection, methods=["GET"]))
+
     shared_secret = os.environ.get("MCP_SHARED_SECRET")
     if shared_secret:
         app = Starlette(
